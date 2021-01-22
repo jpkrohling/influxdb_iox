@@ -199,11 +199,6 @@ async fn read_and_write_data() {
         );
     }
 
-    // Make an invalid organization WAL dir to test that the server ignores it
-    // instead of crashing
-    let invalid_org_dir = server.dir.path().join("not-an-org-id");
-    fs::create_dir(invalid_org_dir).unwrap();
-
     let mut storage_client = StorageClient::connect(GRPC_URL_BASE).await.unwrap();
 
     // Validate that capabilities rpc endpoint is hooked up

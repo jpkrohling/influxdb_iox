@@ -17,6 +17,7 @@
 // - Creating a unique org_id per test
 // - Stopping the server after all relevant tests are run
 
+use arrow_deps::arrow_flight::{flight_service_client::FlightServiceClient, Ticket};
 use assert_cmd::prelude::*;
 use data_types::database_rules::DatabaseRules;
 use futures::prelude::*;
@@ -222,6 +223,22 @@ async fn read_and_write_data() {
         "Actual:\n{:#?}\nExpected:\n{:#?}",
         text, expected_read_data
     );
+
+    let mut flight_client = FlightServiceClient::connect(GRPC_URL_BASE).await.unwrap();
+    let t = Ticket {
+        ticket: "select * from cpu_load_short".into(),
+    };
+    let mut response = flight_client.do_get(t).await.unwrap().into_inner();
+    while let Some(data) = response.next().await {
+        let data = data.unwrap();
+        let body = String::from_utf8(data.data_body).unwrap();
+        assert!(
+            body.lines().eq(&expected_read_data),
+            "Did not match: {:?} vs {:?}",
+            body,
+            expected_read_data.join("\n")
+        );
+    }
 
     // Make an invalid organization WAL dir to test that the server ignores it
     // instead of crashing

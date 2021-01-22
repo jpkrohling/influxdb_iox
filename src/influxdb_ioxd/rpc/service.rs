@@ -2,8 +2,6 @@
 //! implemented in terms of the `query::Database` and
 //! `query::DatabaseStore`
 
-use std::{collections::HashMap, sync::Arc};
-
 use generated_types::{
     i_ox_testing_server::{IOxTesting, IOxTestingServer},
     storage_server::{Storage, StorageServer},
@@ -27,14 +25,25 @@ use data_types::DatabaseName;
 
 use query::{
     exec::seriesset::{Error as SeriesSetError, SeriesSetItem},
+    frontend::sql::SQLQueryPlanner,
     predicate::PredicateBuilder,
     Database, DatabaseStore,
 };
 
+use arrow_deps::{
+    arrow_flight::{
+        self,
+        flight_service_server::{FlightService, FlightServiceServer},
+        Action, ActionType, Criteria, Empty, FlightData, FlightDescriptor, FlightInfo,
+        HandshakeRequest, HandshakeResponse, PutResult, SchemaResult, Ticket,
+    },
+    datafusion::physical_plan::collect,
+};
+use futures::{stream, Stream};
 use snafu::{OptionExt, ResultExt, Snafu};
-
+use std::{collections::HashMap, pin::Pin, slice, sync::Arc};
 use tokio::{net::TcpListener, sync::mpsc};
-use tonic::Status;
+use tonic::{Request, Response, Status, Streaming};
 use tracing::{error, info, warn};
 
 use super::data::{
@@ -753,6 +762,118 @@ where
     }
 }
 
+type TonicStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + Sync + 'static>>;
+
+#[tonic::async_trait]
+impl<T> FlightService for GrpcService<T>
+where
+    T: DatabaseStore + 'static,
+{
+    type HandshakeStream = TonicStream<HandshakeResponse>;
+    type ListFlightsStream = TonicStream<FlightInfo>;
+    type DoGetStream = TonicStream<FlightData>;
+    type DoPutStream = TonicStream<PutResult>;
+    type DoActionStream = TonicStream<arrow_flight::Result>;
+    type ListActionsStream = TonicStream<ActionType>;
+    type DoExchangeStream = TonicStream<FlightData>;
+
+    async fn get_schema(
+        &self,
+        _request: Request<FlightDescriptor>,
+    ) -> Result<Response<SchemaResult>, Status> {
+        Err(Status::unimplemented("Not yet implemented"))
+    }
+
+    async fn do_get(
+        &self,
+        _request: Request<Ticket>,
+    ) -> Result<Response<Self::DoGetStream>, Status> {
+        // TODO: get these as arguments
+        let org_id = "0000111100001111";
+        let bucket_id = "1111000011110000";
+        let query = "select * from cpu_load_short";
+
+        let db_name = org_and_bucket_to_database(org_id, bucket_id).unwrap();
+        let db = self.db_store.db(&db_name).await.unwrap();
+
+        let planner = SQLQueryPlanner::default();
+        let executor = self.db_store.executor();
+
+        let physical_plan = planner.query(&*db, query, &executor).await.unwrap();
+
+        // TODO: Are we supposed to be returning a schema of some kind?
+
+        // TODO: This probably wishes to stream the data, instead of chunking it all up.
+        let batches = collect(physical_plan).await.unwrap();
+
+        let batches = batches.into_iter().map(|batch| {
+            // TODO: Figure out what form to return the data
+            let batch = slice::from_ref(&batch);
+            let batch = arrow_deps::arrow::util::pretty::pretty_format_batches(&batch).unwrap();
+
+            Ok(FlightData {
+                app_metadata: vec![],
+                data_body: batch.into_bytes(),
+                data_header: vec![],
+                flight_descriptor: None,
+            })
+        });
+
+        Ok(Response::new(
+            Box::pin(stream::iter(batches)) as Self::DoGetStream
+        ))
+    }
+
+    async fn handshake(
+        &self,
+        _request: Request<Streaming<HandshakeRequest>>,
+    ) -> Result<Response<Self::HandshakeStream>, Status> {
+        Err(Status::unimplemented("Not yet implemented"))
+    }
+
+    async fn list_flights(
+        &self,
+        _request: Request<Criteria>,
+    ) -> Result<Response<Self::ListFlightsStream>, Status> {
+        Err(Status::unimplemented("Not yet implemented"))
+    }
+
+    async fn get_flight_info(
+        &self,
+        _request: Request<FlightDescriptor>,
+    ) -> Result<Response<FlightInfo>, Status> {
+        Err(Status::unimplemented("Not yet implemented"))
+    }
+
+    async fn do_put(
+        &self,
+        _request: Request<Streaming<FlightData>>,
+    ) -> Result<Response<Self::DoPutStream>, Status> {
+        Err(Status::unimplemented("Not yet implemented"))
+    }
+
+    async fn do_action(
+        &self,
+        _request: Request<Action>,
+    ) -> Result<Response<Self::DoActionStream>, Status> {
+        Err(Status::unimplemented("Not yet implemented"))
+    }
+
+    async fn list_actions(
+        &self,
+        _request: Request<Empty>,
+    ) -> Result<Response<Self::ListActionsStream>, Status> {
+        Err(Status::unimplemented("Not yet implemented"))
+    }
+
+    async fn do_exchange(
+        &self,
+        _request: Request<Streaming<FlightData>>,
+    ) -> Result<Response<Self::DoExchangeStream>, Status> {
+        Err(Status::unimplemented("Not yet implemented"))
+    }
+}
+
 trait SetRange {
     /// sets the timestamp range to range, if present
     fn set_range(self, range: Option<TimestampRange>) -> Self;
@@ -1144,6 +1265,7 @@ where
     tonic::transport::Server::builder()
         .add_service(IOxTestingServer::new(GrpcService::new(storage.clone())))
         .add_service(StorageServer::new(GrpcService::new(storage.clone())))
+        .add_service(FlightServiceServer::new(GrpcService::new(storage)))
         .serve_with_incoming(socket)
         .await
         .context(ServerError {})

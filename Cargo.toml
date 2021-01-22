@@ -10,6 +10,7 @@ members = [
     "arrow_deps",
     "data_types",
     "generated_types",
+    "influxdb_iox_client",
     "influxdb_line_protocol",
     "influxdb_tsm",
     "influxdb2_client",
@@ -24,7 +25,6 @@ members = [
     "server",
     "test_helpers",
     "wal",
-    "influxdb_iox_client",
 ]
 
 [profile.release]
@@ -34,6 +34,8 @@ debug = true
 debug = true
 
 [dependencies]
+
+# IOx crates
 arrow_deps = { path = "arrow_deps" }
 data_types = { path = "data_types" }
 generated_types = { path = "generated_types" }
@@ -51,57 +53,56 @@ read_buffer = { path = "read_buffer" }
 server = { path = "server" }
 wal = { path = "wal" }
 
-bytes = "0.5.4"
-hyper = "0.13"
-routerify = "1.1"
-tokio = { version = "0.2", features = ["full"] }
-
-clap = "2.33.1"
-futures = "0.3.1"
-
-serde_json = "1.0.44"
-serde_urlencoded = "0.7.0"
-serde = { version = "1.0", features = ["derive"] }
-csv = "1.1"
+# Crates.io crates
 byteorder = "1.3.4"
-
-tonic = "0.3.1"
+bytes = "0.5.4"
+clap = "2.33.1"
+csv = "1.1"
+dirs = "3.0.1"
+dotenv = "0.15.0"
+env_logger = "0.7.1"
+flate2 = "1.0"
+futures = "0.3.1"
+http = "0.2.0"
+hyper = "0.13"
+lazy_static = "1.4.0"
 prost = "0.6.1"
 prost-types = "0.6.1"
-env_logger = "0.7.1"
+routerify = "1.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.44"
+serde_urlencoded = "0.7.0"
+snafu = "0.6.9"
+structopt = "0.3.21"
+tokio = { version = "0.2", features = ["full"] }
+tonic = "0.3.1"
 tracing = { version = "0.1", features = ["release_max_level_debug"] }
-tracing-futures="0.2.4"
+tracing-futures = "0.2.4"
+tracing-subscriber = "0.2.15"
 
 # OpenTelemetry sinks for tracing
-tracing-subscriber = "0.2.15"
 tracing-opentelemetry = "0.9.0"
 opentelemetry = { version = "0.10", default-features = false, features = ["trace", "tokio"] }
 opentelemetry-jaeger = { version = "0.9", features = ["tokio"] }
 
-http = "0.2.0"
-snafu = "0.6.9"
-flate2 = "1.0"
-structopt = "0.3.21"
-dotenv = "0.15.0"
-dirs = "3.0.1"
-lazy_static = "1.4.0"
-
 [dev-dependencies]
+# IOx crates
+test_helpers = { path = "test_helpers" }
+influxdb2_client = { path = "influxdb2_client" }
+
+# Crates.io crates
 assert_cmd = "1.0.0"
 criterion = "0.3"
-test_helpers = { path = "test_helpers" }
-hex = "0.4.2"
-influxdb2_client = { path = "influxdb2_client" }
 flate2 = "1.0"
+hex = "0.4.2"
+predicates = "1.0.4"
 rand = "0.7.2"
 reqwest = "0.10.1"
-predicates = "1.0.4"
 tempfile = "3.1.0"
 
 [[bin]]
 name = "cpu_feature_check"
 path = "src/cpu_feature_check/main.rs"
-
 
 [[bench]]
 name = "encoders"

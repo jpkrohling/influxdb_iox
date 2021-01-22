@@ -122,10 +122,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "arrow-flight"
+version = "3.0.0-SNAPSHOT"
+source = "git+https://github.com/apache/arrow.git?rev=84126d5d70e9f05f82616e9a8506b53fe1df4a22#84126d5d70e9f05f82616e9a8506b53fe1df4a22"
+dependencies = [
+ "arrow",
+ "bytes 1.0.1",
+ "futures",
+ "proc-macro2",
+ "prost",
+ "prost-derive",
+ "tokio",
+ "tonic",
+ "tonic-build",
+]
+
+[[package]]
 name = "arrow_deps"
 version = "0.1.0"
 dependencies = [
  "arrow",
+ "arrow-flight",
  "datafusion",
  "parquet",
 ]

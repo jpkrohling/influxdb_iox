@@ -41,7 +41,7 @@ use arrow_deps::{
 };
 use futures::{stream, Stream};
 use snafu::{OptionExt, ResultExt, Snafu};
-use std::{collections::HashMap, pin::Pin, slice, sync::Arc};
+use std::{collections::HashMap, pin::Pin, sync::Arc};
 use tokio::{net::TcpListener, sync::mpsc};
 use tonic::{Request, Response, Status, Streaming};
 use tracing::{error, info, warn};
@@ -806,17 +806,18 @@ where
         // TODO: This probably wishes to stream the data, instead of chunking it all up.
         let batches = collect(physical_plan).await.unwrap();
 
-        let batches = batches.into_iter().map(|batch| {
-            // TODO: Figure out what form to return the data
-            let batch = slice::from_ref(&batch);
-            let batch = arrow_deps::arrow::util::pretty::pretty_format_batches(&batch).unwrap();
+        let batches = batches.into_iter().flat_map(|batch| {
+            let options = arrow_deps::arrow::ipc::writer::IpcWriteOptions::default();
 
-            Ok(FlightData {
-                app_metadata: vec![],
-                data_body: batch.into_bytes(),
-                data_header: vec![],
-                flight_descriptor: None,
-            })
+            let (dictionary_flight_data, batch_flight_data) =
+                arrow_deps::arrow_flight::utils::flight_data_from_arrow_batch(&batch, &options);
+
+            // TODO: Should the record batch's FlightData get app_metadata?
+
+            dictionary_flight_data
+                .into_iter()
+                .chain(std::iter::once(batch_flight_data))
+                .map(Ok)
         });
 
         Ok(Response::new(

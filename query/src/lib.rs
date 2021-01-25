@@ -5,7 +5,7 @@
     clippy::use_self
 )]
 
-use arrow_deps::{datafusion::{logical_plan::LogicalPlan, physical_plan::SendableRecordBatchStream}};
+use arrow_deps::{arrow::datatypes::SchemaRef, datafusion::{logical_plan::LogicalPlan, physical_plan::SendableRecordBatchStream}};
 use async_trait::async_trait;
 use data_types::{data::ReplicatedWrite, partition_metadata::Table as TableStats};
 use exec::{Executor, FieldListPlan, SeriesSetPlans, StringSetPlan};
@@ -19,6 +19,7 @@ pub mod group_by;
 pub mod predicate;
 pub mod selection;
 pub mod util;
+pub mod provider;
 
 use self::group_by::GroupByAndAggregate;
 use self::predicate::Predicate;
@@ -130,12 +131,16 @@ pub trait PartitionChunk: Debug + Send + Sync {
     /// desired.
     async fn table_names(&self, predicate: &Predicate) -> Result<LogicalPlan, Self::Error>;
 
-    /// Create a physical operator to scan (with predicate and column
-    /// selection) the data in this chunk.
+    /// Return the schema for the specified table
+    async fn table_schema(&self, table_name: &str) -> Result<SchemaRef, Self::Error>;
+
+    /// Provides access to raw Chunk data as streams of RecordBatches
+    /// This is part of the analog of the `TableProvider` in DataFusion
     ///
-    /// The data is returned as a stream of `RecordBatch`es. This
-    /// method is invoked when actual data (as opposed to metadata)
-    /// needs to be read out of this chunk.
+    /// The reason we can't simply use the TableProvider trait
+    /// directly is that the data for a particular Table lives in
+    /// several chunks within a partition, so there needs to be an
+    /// implementation of TableProvider that stitches together chunks
     fn scan_data(
         &self,
         table_name: &str,
@@ -143,6 +148,7 @@ pub trait PartitionChunk: Debug + Send + Sync {
         selection: Selection<'_>,
     ) -> Result<SendableRecordBatchStream, Self::Error>;
 }
+
 
 #[async_trait]
 /// Storage for `Databases` which can be retrieved by name

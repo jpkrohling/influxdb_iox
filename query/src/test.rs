@@ -1,7 +1,7 @@
 //! This module provides a reference implementaton of `query::DatabaseSource`
 //! and `query::Database` for use in testing.
 
-use arrow_deps::{arrow::record_batch::RecordBatch, datafusion::{logical_plan::LogicalPlan, physical_plan::SendableRecordBatchStream}, util::str_iter_to_batch};
+use arrow_deps::{arrow::datatypes::SchemaRef, datafusion::{logical_plan::LogicalPlan, physical_plan::SendableRecordBatchStream}, util::str_iter_to_batch};
 
 use crate::{exec::Executor, group_by::GroupByAndAggregate, selection::Selection, util::make_scan_plan};
 use crate::{
@@ -488,6 +488,10 @@ impl PartitionChunk for TestChunk {
         let names = self.table_names.iter().map(Some);
         let batch = str_iter_to_batch("tables", names).unwrap();
         Ok(make_scan_plan(batch).unwrap())
+    }
+
+    async fn table_schema(&self, table_name: &str) -> Result<SchemaRef, Self::Error> {
+        todo!()
     }
 }
 

@@ -1,12 +1,9 @@
 //! This module provides a reference implementaton of `query::DatabaseSource`
 //! and `query::Database` for use in testing.
 
-use arrow_deps::{
-    arrow::record_batch::RecordBatch, datafusion::logical_plan::LogicalPlan,
-    util::str_iter_to_batch,
-};
+use arrow_deps::{arrow::record_batch::RecordBatch, datafusion::{logical_plan::LogicalPlan, physical_plan::SendableRecordBatchStream}, util::str_iter_to_batch};
 
-use crate::{exec::Executor, group_by::GroupByAndAggregate, util::make_scan_plan};
+use crate::{exec::Executor, group_by::GroupByAndAggregate, selection::Selection, util::make_scan_plan};
 use crate::{
     exec::FieldListPlan,
     exec::{
@@ -472,12 +469,12 @@ impl PartitionChunk for TestChunk {
         unimplemented!()
     }
 
-    fn table_to_arrow(
+    fn scan_data(
         &self,
-        _dst: &mut Vec<RecordBatch>,
-        _table_name: &str,
-        _columns: &[&str],
-    ) -> Result<(), Self::Error> {
+        table_name: &str,
+        predicate: &Predicate,
+        selection: Selection<'_>,
+    ) -> Result<SendableRecordBatchStream, Self::Error> {
         unimplemented!()
     }
 

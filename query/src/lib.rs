@@ -5,7 +5,7 @@
     clippy::use_self
 )]
 
-use arrow_deps::{arrow::record_batch::RecordBatch, datafusion::logical_plan::LogicalPlan};
+use arrow_deps::{datafusion::{logical_plan::LogicalPlan, physical_plan::SendableRecordBatchStream}};
 use async_trait::async_trait;
 use data_types::{data::ReplicatedWrite, partition_metadata::Table as TableStats};
 use exec::{Executor, FieldListPlan, SeriesSetPlans, StringSetPlan};
@@ -17,10 +17,12 @@ pub mod frontend;
 pub mod func;
 pub mod group_by;
 pub mod predicate;
+pub mod selection;
 pub mod util;
 
 use self::group_by::GroupByAndAggregate;
 use self::predicate::Predicate;
+use self::selection::Selection;
 
 /// A `Database` is the main trait implemented by the IOx subsystems
 /// that store actual data.
@@ -128,14 +130,18 @@ pub trait PartitionChunk: Debug + Send + Sync {
     /// desired.
     async fn table_names(&self, predicate: &Predicate) -> Result<LogicalPlan, Self::Error>;
 
-    /// converts the table to an Arrow RecordBatch and writes to dst
-    /// TODO turn this into a streaming interface
-    fn table_to_arrow(
+    /// Create a physical operator to scan (with predicate and column
+    /// selection) the data in this chunk.
+    ///
+    /// The data is returned as a stream of `RecordBatch`es. This
+    /// method is invoked when actual data (as opposed to metadata)
+    /// needs to be read out of this chunk.
+    fn scan_data(
         &self,
-        dst: &mut Vec<RecordBatch>,
         table_name: &str,
-        columns: &[&str],
-    ) -> Result<(), Self::Error>;
+        predicate: &Predicate,
+        selection: Selection<'_>,
+    ) -> Result<SendableRecordBatchStream, Self::Error>;
 }
 
 #[async_trait]

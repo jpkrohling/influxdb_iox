@@ -7,7 +7,7 @@ pub enum Selection<'a> {
     SpecifiedColumns(&'a [&'a str]),
 }
 
-impl <'a> From<&'a [&'a str]> for Selection<'a> {
+impl<'a> From<&'a [&'a str]> for Selection<'a> {
     fn from(names: &'a [&'a str]) -> Self {
         Self::SpecifiedColumns(names)
     }

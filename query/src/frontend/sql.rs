@@ -2,10 +2,8 @@ use std::sync::Arc;
 
 use snafu::{ResultExt, Snafu};
 
-use crate::{Database, PartitionChunk, exec::Executor, provider::ProviderBuilder};
-use arrow_deps::datafusion::{
-    error::DataFusionError, physical_plan::ExecutionPlan,
-};
+use crate::{exec::Executor, provider::ProviderBuilder, Database, PartitionChunk};
+use arrow_deps::datafusion::{error::DataFusionError, physical_plan::ExecutionPlan};
 
 #[derive(Debug, Snafu)]
 pub enum Error {

@@ -1,9 +1,15 @@
 //! This module provides a reference implementaton of `query::DatabaseSource`
 //! and `query::Database` for use in testing.
 
-use arrow_deps::{arrow::datatypes::SchemaRef, datafusion::{logical_plan::LogicalPlan, physical_plan::SendableRecordBatchStream}, util::str_iter_to_batch};
+use arrow_deps::{
+    arrow::datatypes::SchemaRef,
+    datafusion::{logical_plan::LogicalPlan, physical_plan::SendableRecordBatchStream},
+    util::str_iter_to_batch,
+};
 
-use crate::{exec::Executor, group_by::GroupByAndAggregate, selection::Selection, util::make_scan_plan};
+use crate::{
+    exec::Executor, group_by::GroupByAndAggregate, selection::Selection, util::make_scan_plan,
+};
 use crate::{
     exec::FieldListPlan,
     exec::{

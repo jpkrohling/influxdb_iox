@@ -5,7 +5,10 @@
     clippy::use_self
 )]
 
-use arrow_deps::{arrow::datatypes::SchemaRef, datafusion::{logical_plan::LogicalPlan, physical_plan::SendableRecordBatchStream}};
+use arrow_deps::{
+    arrow::datatypes::SchemaRef,
+    datafusion::{logical_plan::LogicalPlan, physical_plan::SendableRecordBatchStream},
+};
 use async_trait::async_trait;
 use data_types::{data::ReplicatedWrite, partition_metadata::Table as TableStats};
 use exec::{Executor, FieldListPlan, SeriesSetPlans, StringSetPlan};
@@ -17,9 +20,9 @@ pub mod frontend;
 pub mod func;
 pub mod group_by;
 pub mod predicate;
+pub mod provider;
 pub mod selection;
 pub mod util;
-pub mod provider;
 
 use self::group_by::GroupByAndAggregate;
 use self::predicate::Predicate;
@@ -148,7 +151,6 @@ pub trait PartitionChunk: Debug + Send + Sync {
         selection: Selection<'_>,
     ) -> Result<SendableRecordBatchStream, Self::Error>;
 }
-
 
 #[async_trait]
 /// Storage for `Databases` which can be retrieved by name

@@ -96,6 +96,14 @@ impl Display for ResultSchema {
     }
 }
 
+impl TryFrom<ResultSchema> for data_types::schema::Schema {
+    type Error = data_types::schema::builder::Error;
+
+    fn try_from(rs: ResultSchema) -> Result<Self, Self::Error> {
+        Self::try_from(&rs)
+    }
+}
+
 impl TryFrom<&ResultSchema> for data_types::schema::Schema {
     type Error = data_types::schema::builder::Error;
 

@@ -15,7 +15,7 @@ use chrono::{DateTime, Utc};
 use generated_types::wal as wb;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use data_types::{partition_metadata::Table as TableStats, TIME_COLUMN_NAME};
+use data_types::{partition_metadata::Table as TableStats, schema::Schema, TIME_COLUMN_NAME};
 use query::{
     predicate::{Predicate, TimestampRange},
     selection::Selection,
@@ -66,6 +66,9 @@ pub enum Error {
 
     #[snafu(display("Table {} not found in chunk {}", table, chunk))]
     TableNotFoundInChunk { table: u32, chunk: u64 },
+
+    #[snafu(display("Table '{}' not found in chunk {}", table_name, chunk_id))]
+    NamedTableNotFoundInChunk { table_name: String, chunk_id: u64 },
 
     #[snafu(display("Time Column was not not found in chunk {}", chunk))]
     TimeColumnNotFoundInChunk { chunk: u64, source: DictionaryError },
@@ -464,6 +467,21 @@ impl Chunk {
 
         ChunkIdSet::Present(symbols)
     }
+
+    /// Return Schema for the specified table / columns
+    pub fn table_schema(&self, table_name: &str, selection: ChunkSelection<'_>) -> Result<Schema> {
+        let table = self
+            .table(table_name)?
+            // Option --> Result
+            .context(NamedTableNotFoundInChunk {
+                table_name,
+                chunk_id: self.id(),
+            })?;
+
+        table
+            .schema(self, selection)
+            .context(NamedTableError { table_name })
+    }
 }
 
 #[async_trait]
@@ -493,6 +511,19 @@ impl query::PartitionChunk for Chunk {
 
     async fn table_names(&self, _predicate: &Predicate) -> Result<LogicalPlan, Self::Error> {
         unimplemented!("please use table_names function directly")
+    }
+
+    async fn table_schema(
+        &self,
+        table_name: &str,
+        selection: Selection<'_>,
+    ) -> Result<Schema, Self::Error> {
+        let selection = to_mutable_buffer_selection(selection);
+        self.table_schema(table_name, selection)
+    }
+
+    async fn has_table(&self, table_name: &str) -> bool {
+        matches!(self.table(table_name), Ok(Some(_)))
     }
 }
 

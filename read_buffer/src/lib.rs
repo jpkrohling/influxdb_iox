@@ -15,6 +15,7 @@ use std::{
 };
 
 use arrow_deps::{arrow::record_batch::RecordBatch, util::str_iter_to_batch};
+use data_types::schema::{builder::SchemaMerger, Schema};
 use snafu::{ensure, OptionExt, ResultExt, Snafu};
 
 // Identifiers that are exported as part of the public API.
@@ -35,6 +36,12 @@ pub enum Error {
     #[snafu(display("arrow conversion error: {}", source))]
     ArrowError {
         source: arrow_deps::arrow::error::ArrowError,
+    },
+
+    #[snafu(display("Error building unioned schema for chunks {:?}: {}", chunk_ids, source))]
+    BuildingSchema {
+        chunk_ids: Vec<u32>,
+        source: data_types::schema::builder::Error,
     },
 
     #[snafu(display("partition key does not exist: {}", key))]
@@ -179,6 +186,66 @@ impl Database {
             .values()
             .map(|chunk| chunk.row_groups())
             .sum()
+    }
+
+    /// Returns the schema for the specified columns in the provided table, for
+    /// the specified partition key and chunks within that partition.
+    pub fn table_schema<'a>(
+        &self,
+        partition_key: &str,
+        table_name: &'a str,
+        chunk_ids: &[u32],
+        select_columns: ColumnSelection<'a>,
+    ) -> Result<Schema> {
+        let partition = self
+            .partitions
+            .get(partition_key)
+            .context(PartitionNotFound { key: partition_key })?;
+
+        let schema_builder =
+            chunk_ids
+                .iter()
+                .try_fold(SchemaMerger::new(), |builder, chunk_id| {
+                    let chunk = partition
+                        .chunks
+                        .get(chunk_id)
+                        .context(ChunkNotFound { id: *chunk_id })?;
+
+                    let result_schema = chunk.table_schema(table_name, &select_columns);
+
+                    let builder = if let Some(result_schema) = result_schema {
+                        let schema = result_schema
+                            .try_into()
+                            .context(BuildingSchema { chunk_ids })?;
+
+                        builder
+                            .merge(schema)
+                            .context(BuildingSchema { chunk_ids })?
+                    } else {
+                        builder
+                    };
+                    Ok(builder)
+                })?;
+
+        schema_builder.build().context(BuildingSchema { chunk_ids })
+    }
+
+    /// returns true if the table exists in at least one of the specified chunks
+    pub fn has_table(&self, partition_key: &str, table_name: &str, chunk_ids: &[u32]) -> bool {
+        if let Some(partition) = self.partitions.get(partition_key) {
+            for chunk_id in chunk_ids {
+                let chunk_has_table = partition
+                    .chunks
+                    .get(chunk_id)
+                    .map(|chunk| chunk.has_table(table_name))
+                    .unwrap_or(false);
+
+                if chunk_has_table {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// Returns rows for the specified columns in the provided table, for the
@@ -710,7 +777,7 @@ mod test {
         array::{
             ArrayRef, BinaryArray, BooleanArray, Float64Array, Int64Array, StringArray, UInt64Array,
         },
-        datatypes::DataType::{Float64, UInt64},
+        datatypes::DataType::{Float64, Int64, UInt64},
     };
 
     use column::Values;
@@ -945,6 +1012,141 @@ mod test {
             &data,
             res_col,
             &Values::String(vec![Some("20 Size"), Some("Coolverine")]),
+        );
+    }
+
+    #[test]
+    fn read_table_schema_all() {
+        let mut db = Database::new();
+
+        let input_schema = SchemaBuilder::new()
+            .non_null_tag("region")
+            .non_null_field("int_field", Int64)
+            .non_null_field("float_field", Float64)
+            // Note string and boolean types not currently supported
+            // not currently supported
+            //.non_null_field("string_field", Utf8)
+            //.non_null_field("bool_field", Boolean)
+            .timestamp()
+            .build()
+            .unwrap();
+
+        let data: Vec<ArrayRef> = vec![
+            Arc::new(StringArray::from(vec!["us-west"])),
+            Arc::new(Int64Array::from(vec![1])),
+            Arc::new(Float64Array::from(vec![1.2])),
+            //Arc::new(StringArray::from(vec!["string_value"])),
+            //Arc::new(BooleanArray::from(vec![true])),
+            Arc::new(Int64Array::from(vec![100])),
+        ];
+
+        // Add a record batch to a single partition
+        let rb = RecordBatch::try_new((&input_schema).into(), data).unwrap();
+        db.upsert_partition("hour_1", 0, "Coolverine", rb);
+
+        // Expected schema has the same columns, but they can be
+        // nullable and are in sorted order.
+        let expected_schema = SchemaBuilder::new()
+            .field("float_field", Float64)
+            .field("int_field", Int64)
+            .tag("region")
+            // Note string and boolean types not currently supported
+            // not currently supported
+            //.non_null_field("string_field", Utf8)
+            //.non_null_field("bool_field", Boolean)
+            .timestamp()
+            .build()
+            .unwrap();
+
+        let actual_schema = db
+            .table_schema("hour_1", "Coolverine", &[0], ColumnSelection::All)
+            .unwrap();
+        assert_eq!(
+            actual_schema, expected_schema,
+            "Mismatch on all columns\nExpected:\n{:#?}\nActual:\n{:#?}",
+            expected_schema, actual_schema
+        );
+
+        // a selection of the schema should return only a subset of columns
+
+        let subset_schema = SchemaBuilder::new().tag("region").build().unwrap();
+
+        let selection = ColumnSelection::Some(&["region"]);
+        // the resulting schema should be the same
+        let actual_schema = db
+            .table_schema("hour_1", "Coolverine", &[0], selection)
+            .unwrap();
+        assert_eq!(
+            actual_schema, subset_schema,
+            "Mismatch on all columns\nExpected:\n{:#?}\nActual:\n{:#?}",
+            subset_schema, actual_schema
+        );
+    }
+
+    #[test]
+    fn read_table_schema_union() {
+        let mut db = Database::new();
+
+        // insert two row groups and expect the schema to be unioned
+        let schema1 = SchemaBuilder::new()
+            .non_null_tag("region")
+            .timestamp()
+            .build()
+            .unwrap();
+
+        // Add a bunch of row groups to a single table across multiple chunks
+        let data: Vec<ArrayRef> = vec![
+            Arc::new(StringArray::from(vec!["us-west"])),
+            Arc::new(Int64Array::from(vec![100])),
+        ];
+
+        // Add a record batch to a single partition
+        let rb = RecordBatch::try_new(schema1.into(), data).unwrap();
+
+        // The row group gets added to a different chunk each time.
+        let chunk_id1 = 1;
+        db.upsert_partition("hour_1", chunk_id1, "Coolverine", rb);
+
+        let schema2 = SchemaBuilder::new()
+            .non_null_tag("new_region")
+            .non_null_field("new_field", Int64)
+            .timestamp()
+            .build()
+            .unwrap();
+
+        let data: Vec<ArrayRef> = vec![
+            Arc::new(StringArray::from(vec!["us-east-boston"])),
+            Arc::new(Int64Array::from(vec![2])),
+            Arc::new(Int64Array::from(vec![100])),
+        ];
+
+        // Add a record batch to a single partition
+        let rb = RecordBatch::try_new(schema2.into(), data).unwrap();
+
+        let chunk_id2 = 2;
+        db.upsert_partition("hour_1", 2, "Coolverine", rb);
+
+        let unioned_schema = SchemaBuilder::new()
+            .tag("new_region")
+            .field("new_field", Int64)
+            .tag("region")
+            .timestamp()
+            .build()
+            .unwrap();
+
+        // the resulting schema should be the union of both schema1 and schema2
+        let actual_schema = db
+            .table_schema(
+                "hour_1",
+                "Coolverine",
+                &[chunk_id1, chunk_id2],
+                ColumnSelection::All,
+            )
+            .unwrap();
+        assert_eq!(
+            actual_schema, unioned_schema,
+            "Mismatch on all columns\nExpected:\n{:#?}\nActual:\n{:#?}",
+            unioned_schema, actual_schema
         );
     }
 

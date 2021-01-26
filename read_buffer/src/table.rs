@@ -123,7 +123,20 @@ impl Table {
         // and merge results.
         let rgs = self.filter_row_groups(predicate);
 
-        let schema = ResultSchema {
+        let schema = self.result_schema(columns);
+
+        // temp I think I can remove `predicates` from the results
+        ReadFilterResults {
+            predicate: predicate.clone(),
+            schema,
+            row_groups: rgs,
+        }
+    }
+
+    /// Return the schema resulting from selecting the specified columns from
+    /// this table
+    pub fn result_schema(&self, columns: &ColumnSelection<'_>) -> ResultSchema {
+        ResultSchema {
             select_columns: match columns {
                 ColumnSelection::All => self.meta.schema_for_all_columns(),
                 ColumnSelection::Some(column_names) => {
@@ -131,13 +144,6 @@ impl Table {
                 }
             },
             ..ResultSchema::default()
-        };
-
-        // temp I think I can remove `predicates` from the results
-        ReadFilterResults {
-            predicate: predicate.clone(),
-            schema,
-            row_groups: rgs,
         }
     }
 

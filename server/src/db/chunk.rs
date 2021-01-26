@@ -2,6 +2,7 @@ use arrow_deps::{
     arrow::record_batch::RecordBatch, datafusion::logical_plan::LogicalPlan,
     util::str_iter_to_batch,
 };
+use data_types::schema::Schema;
 use query::{
     predicate::{Predicate, PredicateBuilder},
     selection::Selection,
@@ -189,6 +190,53 @@ impl PartitionChunk for DBChunk {
             }
             Self::ParquetFile => {
                 unimplemented!("parquet file not implemented")
+            }
+        }
+    }
+
+    async fn table_schema(
+        &self,
+        table_name: &str,
+        selection: Selection<'_>,
+    ) -> Result<Schema, Self::Error> {
+        match self {
+            DBChunk::MutableBuffer { chunk } => {
+                let mb_selection = to_mutable_buffer_selection(selection);
+                chunk
+                    .table_schema(table_name, mb_selection)
+                    .context(MutableBufferChunk)
+            }
+            DBChunk::ReadBuffer {
+                db,
+                partition_key,
+                chunk_id,
+            } => {
+                let chunk_id = *chunk_id;
+                let rb_selection = to_read_buffer_selection(selection);
+                let db = db.read().unwrap();
+                db.table_schema(partition_key, table_name, &[chunk_id], rb_selection)
+                    .context(ReadBufferChunk { chunk_id })
+            }
+            DBChunk::ParquetFile => {
+                unimplemented!("parquet file not implemented for table schema")
+            }
+        }
+    }
+
+    async fn has_table(&self, table_name: &str) -> bool {
+        match self {
+            DBChunk::MutableBuffer { chunk } => chunk.has_table(table_name).await,
+            DBChunk::ReadBuffer {
+                db,
+                partition_key,
+                chunk_id,
+            } => {
+                let chunk_id = *chunk_id;
+                let db = db.read().unwrap();
+                db.has_table(partition_key, table_name, &[chunk_id])
+            }
+            DBChunk::ParquetFile => {
+                unimplemented!("parquet file not implemented for has_table")
             }
         }
     }

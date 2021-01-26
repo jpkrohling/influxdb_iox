@@ -1,11 +1,11 @@
 use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
 
-use crate::row_group::RowGroup;
 use crate::row_group::{ColumnName, Predicate};
 use crate::schema::AggregateType;
 use crate::table;
 use crate::table::{ColumnSelection, Table};
 use crate::Error;
+use crate::{row_group::RowGroup, ResultSchema};
 
 type TableName = String;
 
@@ -84,6 +84,19 @@ impl Chunk {
                 e.insert(Table::new(table_name, row_group));
             }
         };
+    }
+
+    /// Returns ResultsSchema for the specified table for the
+    /// specified column selections. Returns None if no such table
+    /// exists in this Chunk
+    pub fn table_schema(
+        &self,
+        table_name: &str,
+        select_columns: &ColumnSelection<'_>,
+    ) -> Option<ResultSchema> {
+        self.tables
+            .get(table_name)
+            .map(|table| table.result_schema(select_columns))
     }
 
     /// Returns an iterator of lazily executed `read_filter` operations on the

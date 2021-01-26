@@ -159,21 +159,15 @@ where
                 .map_err(|e| Box::new(e) as _)
                 .context(PartitionError)?;
 
-            // Note it would be awesome to pass this stream on to write_batches,
-            // but when I did so I got an error like this:
-
-            //         error[E0700]: hidden type for `impl Trait` captures lifetime that does not appear in bounds
-            //    --> server/src/snapshot.rs:209:10
-            //     |
-            // 209 |     ) -> Result<()> {
-            //     |          ^^^^^^^^^^
-
-            let batches = collect(stream).await.unwrap();
+            let schema = self.chunk.table_schema(table_name).await
+                .map_err(|e| Box::new(e) as _)
+                .context(PartitionError)?;
 
             let mut location = self.data_path.clone();
             let file_name = format!("{}.parquet", table_name);
             location.set_file_name(&file_name);
-            self.write_batches(batches, &location).await?;
+            let data = Self::parquet_stream_to_bytes(stream, schema).await?;
+            self.write_to_object_store(data, &location).await?;
             self.mark_table_finished(pos);
 
             if self.should_stop() {
@@ -208,24 +202,32 @@ where
         Ok(())
     }
 
-    async fn write_batches(
-        &self,
-        batches: Vec<RecordBatch>,
-        file_name: &ObjectStorePath,
-    ) -> Result<()> {
+    /// Convert the record batches in stream to bytes in a parquet file stream in memory
+    /// TODO: connect the streams to avoid buffering into Vec<u8>
+    async fn parquet_stream_to_bytes(mut stream: SendableRecordBatchStream, schema: SchemaRef) -> Result<Vec<u8>> {
         let mem_writer = MemWriter::default();
         {
-            let mut writer = ArrowWriter::try_new(mem_writer.clone(), batches[0].schema(), None)
+            let mut writer = ArrowWriter::try_new(mem_writer.clone(), schema, None)
                 .context(OpeningParquetWriter)?;
-            for batch in batches.into_iter() {
+            while let Some(batch) = stream.next().await {
+                let batch = batch.unwrap();
                 writer.write(&batch).context(WritingParquetToMemory)?;
             }
             writer.close().context(ClosingParquetWriter)?;
         } // drop the reference to the MemWriter that the SerializedFileWriter has
 
-        let data = mem_writer
-            .into_inner()
-            .expect("Nothing else should have a reference here");
+        Ok(mem_writer
+           .into_inner()
+           .expect("Nothing else should have a reference here")
+        )
+
+    }
+
+    async fn write_to_object_store(
+        &self,
+        data: Vec<u8>,
+        file_name: &ObjectStorePath,
+    ) -> Result<()> {
 
         let len = data.len();
         let data = Bytes::from(data);

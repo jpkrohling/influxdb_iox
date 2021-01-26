@@ -484,7 +484,10 @@ impl query::PartitionChunk for Chunk {
         unimplemented!("This function is slated for removal")
     }
 
-    async fn table_schema(&self, _table_name: &str) -> Result<arrow_deps::arrow::datatypes::SchemaRef, Self::Error> {
+    async fn table_schema(
+        &self,
+        _table_name: &str,
+    ) -> Result<arrow_deps::arrow::datatypes::SchemaRef, Self::Error> {
         todo!()
     }
 

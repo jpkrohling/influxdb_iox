@@ -1,4 +1,8 @@
-use arrow_deps::{arrow::record_batch::RecordBatch, datafusion::{logical_plan::LogicalPlan, physical_plan::SendableRecordBatchStream}, util::str_iter_to_batch};
+use arrow_deps::{
+    arrow::record_batch::RecordBatch,
+    datafusion::{logical_plan::LogicalPlan, physical_plan::SendableRecordBatchStream},
+    util::str_iter_to_batch,
+};
 use query::{
     predicate::{Predicate, PredicateBuilder},
     util::make_scan_plan,
@@ -72,7 +76,6 @@ impl DBChunk {
         })
     }
 
-
     fn table_to_arrow(
         &self,
         dst: &mut Vec<RecordBatch>,
@@ -121,7 +124,6 @@ impl DBChunk {
         }
         Ok(())
     }
-
 }
 
 #[async_trait]
@@ -175,7 +177,10 @@ impl PartitionChunk for DBChunk {
         }
     }
 
-    async fn table_schema(&self, table_name: &str) -> Result<arrow_deps::arrow::datatypes::SchemaRef, Self::Error> {
+    async fn table_schema(
+        &self,
+        table_name: &str,
+    ) -> Result<arrow_deps::arrow::datatypes::SchemaRef, Self::Error> {
         todo!()
     }
 

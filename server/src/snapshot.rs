@@ -1,10 +1,14 @@
 //! This module contains code for snapshotting a database chunk to Parquet
 //! files in object storage.
-use arrow_deps::{arrow::{datatypes::SchemaRef, record_batch::RecordBatch}, datafusion::physical_plan::{SendableRecordBatchStream, common::collect}, parquet::{self, arrow::ArrowWriter, file::writer::TryClone}};
+use arrow_deps::{
+    arrow::{datatypes::SchemaRef, record_batch::RecordBatch},
+    datafusion::physical_plan::{common::collect, SendableRecordBatchStream},
+    parquet::{self, arrow::ArrowWriter, file::writer::TryClone},
+};
 use data_types::partition_metadata::{Partition as PartitionMeta, Table};
 use futures::StreamExt;
 use object_store::{path::ObjectStorePath, ObjectStore};
-use query::{PartitionChunk, predicate::Predicate, selection::Selection};
+use query::{predicate::Predicate, selection::Selection, PartitionChunk};
 
 use std::io::{Cursor, Seek, SeekFrom, Write};
 use std::sync::{Arc, Mutex};
@@ -49,7 +53,7 @@ pub enum Error {
     #[snafu(display("Error reading batches while writing to '{}': {}", file_name, source))]
     ReadingBatches {
         file_name: String,
-        source: arrow_deps::arrow::error::ArrowError
+        source: arrow_deps::arrow::error::ArrowError,
     },
 
     #[snafu(display("Stopped early"))]
@@ -155,11 +159,16 @@ where
             // get all the data in this chunk:
             let predicate = Predicate::default();
             let selection = Selection::AllColumns;
-            let stream = self.chunk.scan_data(table_name, &predicate, selection)
+            let stream = self
+                .chunk
+                .scan_data(table_name, &predicate, selection)
                 .map_err(|e| Box::new(e) as _)
                 .context(PartitionError)?;
 
-            let schema = self.chunk.table_schema(table_name).await
+            let schema = self
+                .chunk
+                .table_schema(table_name)
+                .await
                 .map_err(|e| Box::new(e) as _)
                 .context(PartitionError)?;
 
@@ -202,9 +211,12 @@ where
         Ok(())
     }
 
-    /// Convert the record batches in stream to bytes in a parquet file stream in memory
-    /// TODO: connect the streams to avoid buffering into Vec<u8>
-    async fn parquet_stream_to_bytes(mut stream: SendableRecordBatchStream, schema: SchemaRef) -> Result<Vec<u8>> {
+    /// Convert the record batches in stream to bytes in a parquet file stream
+    /// in memory TODO: connect the streams to avoid buffering into Vec<u8>
+    async fn parquet_stream_to_bytes(
+        mut stream: SendableRecordBatchStream,
+        schema: SchemaRef,
+    ) -> Result<Vec<u8>> {
         let mem_writer = MemWriter::default();
         {
             let mut writer = ArrowWriter::try_new(mem_writer.clone(), schema, None)
@@ -217,10 +229,8 @@ where
         } // drop the reference to the MemWriter that the SerializedFileWriter has
 
         Ok(mem_writer
-           .into_inner()
-           .expect("Nothing else should have a reference here")
-        )
-
+            .into_inner()
+            .expect("Nothing else should have a reference here"))
     }
 
     async fn write_to_object_store(
@@ -228,7 +238,6 @@ where
         data: Vec<u8>,
         file_name: &ObjectStorePath,
     ) -> Result<()> {
-
         let len = data.len();
         let data = Bytes::from(data);
         let stream_data = Result::Ok(data);

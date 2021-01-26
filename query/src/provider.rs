@@ -35,7 +35,8 @@ pub enum Error {
 }
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-/// Builds a ChunkTableProvider that ensures the schema across chunks is compatible
+/// Builds a ChunkTableProvider that ensures the schema across chunks is
+/// compatible
 #[derive(Debug)]
 pub struct ProviderBuilder<C: PartitionChunk + 'static> {
     table_name: String,
@@ -64,7 +65,11 @@ impl<C: PartitionChunk> ProviderBuilder<C> {
 
     /// returns Ok(combined_schema) if the schema of chunk is compatible with
     /// `existing_schema`, Err() with why otherwise
-    fn check_schema(&self, existing_schema: SchemaRef, chunk_schema: SchemaRef) -> Result<SchemaRef> {
+    fn check_schema(
+        &self,
+        existing_schema: SchemaRef,
+        chunk_schema: SchemaRef,
+    ) -> Result<SchemaRef> {
         // For now, use strict equality. Eventually should union the schema
         if existing_schema != chunk_schema {
             ChunkSchemaNotCompatible {

@@ -117,6 +117,8 @@ impl<C: PartitionChunk + 'static> TableProvider for ChunkTableProvider<C> {
         batch_size: usize,
         filters: &[Expr],
     ) -> std::result::Result<Arc<dyn ExecutionPlan>, DataFusionError> {
+        // make an execution plan that just holds the sendable streams from each chunk
+
         todo!()
     }
 

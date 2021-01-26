@@ -1,6 +1,6 @@
 //! This module contains code for snapshotting a database chunk to Parquet
 //! files in object storage.
-use arrow_deps::{arrow::{datatypes::SchemaRef, record_batch::RecordBatch}, datafusion::physical_plan::SendableRecordBatchStream, parquet::{self, arrow::ArrowWriter, file::writer::TryClone}};
+use arrow_deps::{arrow::{datatypes::SchemaRef, record_batch::RecordBatch}, datafusion::physical_plan::{SendableRecordBatchStream, common::collect}, parquet::{self, arrow::ArrowWriter, file::writer::TryClone}};
 use data_types::partition_metadata::{Partition as PartitionMeta, Table};
 use futures::StreamExt;
 use object_store::{path::ObjectStorePath, ObjectStore};
@@ -159,14 +159,21 @@ where
                 .map_err(|e| Box::new(e) as _)
                 .context(PartitionError)?;
 
-            let schema = self.chunk.table_schema(table_name).await
-                .map_err(|e| Box::new(e) as _)
-                .context(PartitionError)?;
+            // Note it would be awesome to pass this stream on to write_batches,
+            // but when I did so I got an error like this:
+
+            //         error[E0700]: hidden type for `impl Trait` captures lifetime that does not appear in bounds
+            //    --> server/src/snapshot.rs:209:10
+            //     |
+            // 209 |     ) -> Result<()> {
+            //     |          ^^^^^^^^^^
+
+            let batches = collect(stream).await.unwrap();
 
             let mut location = self.data_path.clone();
             let file_name = format!("{}.parquet", table_name);
             location.set_file_name(&file_name);
-            self.write_batches(stream, schema, &location).await?;
+            self.write_batches(batches, &location).await?;
             self.mark_table_finished(pos);
 
             if self.should_stop() {
@@ -203,17 +210,14 @@ where
 
     async fn write_batches(
         &self,
-        batches: SendableRecordBatchStream,
-        schema: SchemaRef,
+        batches: Vec<RecordBatch>,
         file_name: &ObjectStorePath,
     ) -> Result<()> {
         let mem_writer = MemWriter::default();
         {
-            let mut writer = ArrowWriter::try_new(mem_writer.clone(), schema, None)
+            let mut writer = ArrowWriter::try_new(mem_writer.clone(), batches[0].schema(), None)
                 .context(OpeningParquetWriter)?;
-            while let Some(batch) = batches.next().await {
-                let batch = batch.unwrap();
-                //.with_context(|| ReadingBatches { file_name: format!("{:?}", file_name)})?;
+            for batch in batches.into_iter() {
                 writer.write(&batch).context(WritingParquetToMemory)?;
             }
             writer.close().context(ClosingParquetWriter)?;
@@ -226,12 +230,6 @@ where
         let len = data.len();
         let data = Bytes::from(data);
         let stream_data = Result::Ok(data);
-
-//         error[E0700]: hidden type for `impl Trait` captures lifetime that does not appear in bounds
-//    --> server/src/snapshot.rs:209:10
-//     |
-// 209 |     ) -> Result<()> {
-//     |          ^^^^^^^^^^
 
         self.store
             .put(

@@ -1,4 +1,6 @@
 //! Implementation of a DataFusion TableProvider in terms of PartitionChunks
+//!
+//! This allows DataFusion to see data from Chunks as a single table
 
 use std::sync::Arc;
 
@@ -17,11 +19,13 @@ use snafu::Snafu;
 #[derive(Debug, Snafu)]
 pub enum Error {
     #[snafu(display(
-        "Chunk schema not compatible. They must be identical. Existing: {:?}, New: {:?}",
+        "Chunk schema not compatible for table '{}'. They must be identical. Existing: {:?}, New: {:?}",
+        table_name,
         existing_schema,
         chunk_schema
     ))]
     ChunkSchemaNotCompatible {
+        table_name: String,
         existing_schema: SchemaRef,
         chunk_schema: SchemaRef,
     },
@@ -31,7 +35,8 @@ pub enum Error {
 }
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-/// Builds a ChunkTableProvider with error checking
+/// Builds a ChunkTableProvider that ensures the schema across chunks is compatible
+#[derive(Debug)]
 pub struct ProviderBuilder<C: PartitionChunk + 'static> {
     table_name: String,
     schema: Option<SchemaRef>,
@@ -49,7 +54,7 @@ impl<C: PartitionChunk> ProviderBuilder<C> {
 
     pub fn add_chunk(mut self, chunk: Arc<C>, chunk_table_schema: SchemaRef) -> Result<Self> {
         self.schema = Some(if let Some(existing_schema) = self.schema.take() {
-            Self::check_schema(existing_schema, chunk_table_schema)?
+            self.check_schema(existing_schema, chunk_table_schema)?
         } else {
             chunk_table_schema
         });
@@ -59,10 +64,11 @@ impl<C: PartitionChunk> ProviderBuilder<C> {
 
     /// returns Ok(combined_schema) if the schema of chunk is compatible with
     /// `existing_schema`, Err() with why otherwise
-    fn check_schema(existing_schema: SchemaRef, chunk_schema: SchemaRef) -> Result<SchemaRef> {
+    fn check_schema(&self, existing_schema: SchemaRef, chunk_schema: SchemaRef) -> Result<SchemaRef> {
         // For now, use strict equality. Eventually should union the schema
         if existing_schema != chunk_schema {
             ChunkSchemaNotCompatible {
+                table_name: &self.table_name,
                 existing_schema,
                 chunk_schema,
             }
@@ -78,6 +84,7 @@ impl<C: PartitionChunk> ProviderBuilder<C> {
             schema,
             chunks,
         } = self;
+
         // TODO proper error handling
         let schema = schema.unwrap();
 
@@ -96,6 +103,7 @@ impl<C: PartitionChunk> ProviderBuilder<C> {
 }
 
 // Implementation of a DataFusion TableProvider in terms of PartitionChunks
+#[derive(Debug)]
 pub struct ChunkTableProvider<C: PartitionChunk> {
     table_name: String,
     schema: SchemaRef,
@@ -113,9 +121,9 @@ impl<C: PartitionChunk + 'static> TableProvider for ChunkTableProvider<C> {
 
     fn scan(
         &self,
-        projection: &Option<Vec<usize>>,
-        batch_size: usize,
-        filters: &[Expr],
+        _projection: &Option<Vec<usize>>,
+        _batch_size: usize,
+        _filters: &[Expr],
     ) -> std::result::Result<Arc<dyn ExecutionPlan>, DataFusionError> {
         // make an execution plan that just holds the sendable streams from each chunk
 

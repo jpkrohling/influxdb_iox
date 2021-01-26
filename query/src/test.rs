@@ -477,9 +477,9 @@ impl PartitionChunk for TestChunk {
 
     fn scan_data(
         &self,
-        table_name: &str,
-        predicate: &Predicate,
-        selection: Selection<'_>,
+        _table_name: &str,
+        _predicate: &Predicate,
+        _selection: Selection<'_>,
     ) -> Result<SendableRecordBatchStream, Self::Error> {
         unimplemented!()
     }
@@ -496,8 +496,8 @@ impl PartitionChunk for TestChunk {
         Ok(make_scan_plan(batch).unwrap())
     }
 
-    async fn table_schema(&self, table_name: &str) -> Result<SchemaRef, Self::Error> {
-        todo!()
+    async fn table_schema(&self, _table_name: &str) -> Result<SchemaRef, Self::Error> {
+        unimplemented!()
     }
 }
 

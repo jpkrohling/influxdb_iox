@@ -1,4 +1,5 @@
 //! This represents selecting a set of columns
+#[derive(Debug)]
 pub enum Selection<'a> {
     /// Return all columns (e.g. SELECT *)
     AllColumns,

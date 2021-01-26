@@ -1,12 +1,10 @@
 //! This module contains code for snapshotting a database chunk to Parquet
 //! files in object storage.
-use arrow_deps::{
-    arrow::record_batch::RecordBatch,
-    parquet::{self, arrow::ArrowWriter, file::writer::TryClone},
-};
+use arrow_deps::{arrow::{datatypes::SchemaRef, record_batch::RecordBatch}, datafusion::physical_plan::SendableRecordBatchStream, parquet::{self, arrow::ArrowWriter, file::writer::TryClone}};
 use data_types::partition_metadata::{Partition as PartitionMeta, Table};
+use futures::StreamExt;
 use object_store::{path::ObjectStorePath, ObjectStore};
-use query::PartitionChunk;
+use query::{PartitionChunk, predicate::Predicate, selection::Selection};
 
 use std::io::{Cursor, Seek, SeekFrom, Write};
 use std::sync::{Arc, Mutex};
@@ -48,6 +46,12 @@ pub enum Error {
     #[snafu(display("Error writing to object store: {}", source))]
     WritingToObjectStore { source: object_store::Error },
 
+    #[snafu(display("Error reading batches while writing to '{}': {}", file_name, source))]
+    ReadingBatches {
+        file_name: String,
+        source: arrow_deps::arrow::error::ArrowError
+    },
+
     #[snafu(display("Stopped early"))]
     StoppedEarly,
 }
@@ -64,7 +68,7 @@ where
     pub metadata_path: ObjectStorePath,
     pub data_path: ObjectStorePath,
     store: Arc<ObjectStore>,
-    partition: Arc<T>,
+    chunk: Arc<T>,
     status: Mutex<Status>,
 }
 
@@ -96,7 +100,7 @@ where
             metadata_path,
             data_path,
             store,
-            partition,
+            chunk: partition,
             status: Mutex::new(status),
         }
     }
@@ -148,16 +152,21 @@ where
 
     async fn run(&self, notify: Option<oneshot::Sender<()>>) -> Result<()> {
         while let Some((pos, table_name)) = self.next_table() {
-            let mut batches = Vec::new();
-            self.partition
-                .table_to_arrow(&mut batches, table_name, &[])
+            // get all the data in this chunk:
+            let predicate = Predicate::default();
+            let selection = Selection::AllColumns;
+            let stream = self.chunk.scan_data(table_name, &predicate, selection)
+                .map_err(|e| Box::new(e) as _)
+                .context(PartitionError)?;
+
+            let schema = self.chunk.table_schema(table_name).await
                 .map_err(|e| Box::new(e) as _)
                 .context(PartitionError)?;
 
             let mut location = self.data_path.clone();
             let file_name = format!("{}.parquet", table_name);
             location.set_file_name(&file_name);
-            self.write_batches(batches, &location).await?;
+            self.write_batches(stream, schema, &location).await?;
             self.mark_table_finished(pos);
 
             if self.should_stop() {
@@ -194,14 +203,17 @@ where
 
     async fn write_batches(
         &self,
-        batches: Vec<RecordBatch>,
+        batches: SendableRecordBatchStream,
+        schema: SchemaRef,
         file_name: &ObjectStorePath,
     ) -> Result<()> {
         let mem_writer = MemWriter::default();
         {
-            let mut writer = ArrowWriter::try_new(mem_writer.clone(), batches[0].schema(), None)
+            let mut writer = ArrowWriter::try_new(mem_writer.clone(), schema, None)
                 .context(OpeningParquetWriter)?;
-            for batch in batches.into_iter() {
+            while let Some(batch) = batches.next().await {
+                let batch = batch.unwrap();
+                //.with_context(|| ReadingBatches { file_name: format!("{:?}", file_name)})?;
                 writer.write(&batch).context(WritingParquetToMemory)?;
             }
             writer.close().context(ClosingParquetWriter)?;
@@ -214,6 +226,12 @@ where
         let len = data.len();
         let data = Bytes::from(data);
         let stream_data = Result::Ok(data);
+
+//         error[E0700]: hidden type for `impl Trait` captures lifetime that does not appear in bounds
+//    --> server/src/snapshot.rs:209:10
+//     |
+// 209 |     ) -> Result<()> {
+//     |          ^^^^^^^^^^
 
         self.store
             .put(

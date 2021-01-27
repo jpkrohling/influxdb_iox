@@ -227,7 +227,18 @@ impl Database {
                     Ok(builder)
                 })?;
 
-        schema_builder.build().context(BuildingSchema { chunk_ids })
+        let schema = schema_builder
+            .build()
+            .context(BuildingSchema { chunk_ids })?;
+
+        // Ensure the order of the output columns is as requested
+        let schema = if matches!(select_columns, ColumnSelection::All) {
+            schema.sort_fields_by_name()
+        } else {
+            schema
+        };
+
+        Ok(schema)
     }
 
     /// returns true if the table exists in at least one of the specified chunks
@@ -1067,11 +1078,17 @@ mod test {
             expected_schema, actual_schema
         );
 
-        // a selection of the schema should return only a subset of columns
+        // a selection of the schema should return only a subset of columns, in that
+        // order
 
-        let subset_schema = SchemaBuilder::new().tag("region").build().unwrap();
+        let subset_schema = SchemaBuilder::new()
+            .timestamp()
+            .field("int_field", Int64)
+            .tag("region")
+            .build()
+            .unwrap();
 
-        let selection = ColumnSelection::Some(&["region"]);
+        let selection = ColumnSelection::Some(&["time", "int_field", "region"]);
         // the resulting schema should be the same
         let actual_schema = db
             .table_schema("hour_1", "Coolverine", &[0], selection)
@@ -1126,9 +1143,10 @@ mod test {
         let chunk_id2 = 2;
         db.upsert_partition("hour_1", 2, "Coolverine", rb);
 
+        // Note order is lexographic (by name)
         let unioned_schema = SchemaBuilder::new()
-            .tag("new_region")
             .field("new_field", Int64)
+            .tag("new_region")
             .tag("region")
             .timestamp()
             .build()

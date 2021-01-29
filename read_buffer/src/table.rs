@@ -6,7 +6,7 @@ use std::{
     sync::RwLock,
 };
 
-use snafu::{ResultExt, Snafu};
+use snafu::Snafu;
 
 use crate::column::{AggregateResult, Scalar, Value};
 use crate::row_group::{self, ColumnName, GroupKey, Predicate, RowGroup};
